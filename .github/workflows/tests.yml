@@ -1,0 +1,41 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  smoke:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.2', '7.4', '8.1', '8.2', '8.3', '8.4']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, zip
+          coverage: none
+
+      - name: Syntax check
+        run: |
+          find modules/addons/whmcsupdater tests -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Language key parity
+        run: php tests/check_lang_keys.php
+
+      - name: Proxy URL smoke
+        run: php tests/smoke_parse_url.php
+
+      - name: Manual update helpers
+        run: php tests/smoke_manual_update.php
+
+      - name: Staged update job
+        run: php -d extension=zip tests/smoke_update_job.php

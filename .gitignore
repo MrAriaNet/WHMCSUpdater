@@ -1,0 +1,26 @@
+# Runtime work files created on the server (keep only web blockers in git)
+modules/addons/whmcsupdater/storage/work_dir_pointer.txt
+modules/addons/whmcsupdater/storage/php_cli_pointer.txt
+modules/addons/whmcsupdater/storage/web_php_pointer.txt
+modules/addons/whmcsupdater/storage/manual_update/**
+!modules/addons/whmcsupdater/storage/manual_update/.htaccess
+!modules/addons/whmcsupdater/storage/manual_update/index.html
+
+# Distribution archives — attach to GitHub Releases, do not commit
+*.zip
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# Local / temp
+_zip_stage/
+*.log
+*.tmp
+*.part
+.env
+.env.*

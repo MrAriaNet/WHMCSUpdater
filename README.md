@@ -55,7 +55,6 @@ WHMCSUpdater/
 ├── README.md
 ├── LICENSE
 ├── .gitignore
-├── .github/workflows/tests.yml
 ├── docs/
 │   └── VERIFICATION.md
 ├── tests/
@@ -90,7 +89,7 @@ WHMCSUpdater/
 
 ```bash
 cd modules/addons
-zip -r whmcsupdater-1.2.0.zip whmcsupdater \
+zip -r whmcsupdater-1.0.zip whmcsupdater \
   -x "whmcsupdater/storage/manual_update/*" \
   -x "whmcsupdater/storage/work_dir_pointer.txt" \
   -x "whmcsupdater/storage/php_cli_pointer.txt" \
@@ -174,7 +173,7 @@ Use **Addons → WHMCS Updater → Manual Update**, or the CLI.
 
 ### Admin UI
 
-1. **Check for Updates**
+1. **Check for Updates** — then optionally pick a specific **8.x** or **9.x** release from the version list (or leave **Latest compatible (auto)**)
 2. **Download / Resume** (safe to retry; uses `.part` + HTTP Range)
 3. Confirm you have a **database backup**
 4. **Apply Update** (or **Resume Interrupted Update** if a previous run was killed)
@@ -295,9 +294,55 @@ php tests/smoke_manual_update.php
 php -d extension=zip tests/smoke_update_job.php
 ```
 
-GitHub Actions runs the same suite on PHP 7.2, 7.4, 8.1, 8.2, 8.3, and 8.4.
-
 Live checklist: [docs/VERIFICATION.md](docs/VERIFICATION.md)
+
+---
+
+## Changelog
+
+Addon module version is set in `whmcsupdater_config()` (`modules/addons/whmcsupdater/whmcsupdater.php`) and must match the section below. Current release: **1.0**.
+
+### 1.0 — 2026-11-24
+
+Initial public release of **WHMCS Updater** (Linux / WHMCS 8.x & 9.x).
+
+**Proxy Pool**
+
+- Route Automatic Updater traffic through a managed pool of HTTP, HTTPS, and SOCKS5 (`socks5h`) proxies
+- Selection strategies: fastest healthy, priority, random, round-robin
+- Health checks against the WHMCS releases endpoint; connect timeout, attempt limits, and selected-proxy cache TTL
+- Apply modes: update traffic only, or all outbound Admin requests
+- Early hook injection of proxy env vars for libcurl / Guzzle / Composer
+- Admin UI to add, enable/disable, import, health-check, and log proxy activity (English + Farsi/RTL)
+
+**Manual update**
+
+- Resumable ZIP download (`.part` + HTTP Range), stall detection, and automatic proxy failover
+- SHA-256 / file-size verification before any live files are touched
+- Staged apply pipeline with short time budgets and checkpoint resume:
+  `plan → extract → manifest → backup → maintenance → copy → copy_install → verify_files → upgrade → verify_db → finalize`
+- Custom `admin` / `crons` path mapping from `configuration.php`
+- Never overwrites `configuration.php` or `vendor/whmcs/whmcs-foundation/lib/License.php`
+- Soft-skip for `attachments/`, `downloads/`, `templates_c/` (create only if missing)
+- Explicit file rollback from the last backup directory
+- CLI (`bin/update.php`) and Admin UI progress / resume controls
+
+**Recovery**
+
+- Standalone `update_runner.php` and CLI apply paths that do not bootstrap WHMCS (safe during Err 2)
+- One-time `status_token` auth for status / step / start / finalize / rollback / HTML recovery UI
+
+**WHMCS 8.x ↔ 9.x**
+
+- Compatible with WHMCS 8.x and 9.x; PHP/ionCube constraints taken from the release catalog
+- Manual Update version picker: Latest compatible (auto), or a specific **8.x** / **9.x** release
+- Incompatible targets shown disabled with an “(incompatible)” label and PHP/ionCube guidance
+- Major-upgrade warnings when crossing series
+
+**Post-update UX**
+
+- “Check for Updates” when already current shows a green “Your system is up to date.” message (not a red error); cleared on page refresh
+- After a successful update, Admin UI and Recovery UI optionally offer clearing the Smarty template cache (`templates_c` / `$templates_compiledir`); CLI still clears by default (`--keep-templates` to skip)
 
 ---
 

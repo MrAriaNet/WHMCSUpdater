@@ -25,6 +25,9 @@ class UpdateApplier
     /** @var string Absolute path to crons directory */
     private $cronsDir = '';
 
+    /** @var string Absolute path to Smarty compiled templates directory */
+    private $templatesCompileDir = '';
+
     /** @var \PDO|null */
     private $pdo = null;
 
@@ -44,6 +47,7 @@ class UpdateApplier
         $configFile = $this->whmcsRoot . '/configuration.php';
         $customadminpath = 'admin';
         $crons_dir = $this->whmcsRoot . '/crons';
+        $templates_compiledir = null;
 
         if (is_file($configFile)) {
             $license = null;
@@ -52,7 +56,6 @@ class UpdateApplier
             $db_password = null;
             $db_name = null;
             $cc_encryption_hash = null;
-            $templates_compiledir = null;
             include $configFile;
         }
 
@@ -68,6 +71,25 @@ class UpdateApplier
         } else {
             $this->cronsDir = $this->whmcsRoot . '/crons';
         }
+
+        $this->templatesCompileDir = $this->resolveTemplatesCompileDir(
+            is_string($templates_compiledir) ? $templates_compiledir : null
+        );
+    }
+
+    private function resolveTemplatesCompileDir(?string $configured): string
+    {
+        $fallback = $this->whmcsRoot . '/templates_c';
+        if ($configured === null || trim($configured) === '') {
+            return $fallback;
+        }
+
+        $configured = str_replace('\\', '/', trim($configured));
+        if ($configured[0] === '/' || preg_match('#^[A-Za-z]:/#', $configured)) {
+            return rtrim($configured, '/');
+        }
+
+        return rtrim($this->whmcsRoot . '/' . ltrim($configured, '/'), '/');
     }
 
     public function getAdminDirName(): string
@@ -78,6 +100,13 @@ class UpdateApplier
     public function getCronsDir(): string
     {
         return $this->cronsDir;
+    }
+
+    public function getTemplatesCompileDir(): string
+    {
+        return $this->templatesCompileDir !== ''
+            ? $this->templatesCompileDir
+            : ($this->whmcsRoot . '/templates_c');
     }
 
     public function getWhmcsRoot(): string
@@ -1073,12 +1102,6 @@ class UpdateApplier
             $this->log('Removed .whmcs-relocating marker.');
         }
 
-        $templatesC = $this->whmcsRoot . '/templates_c';
-        if (is_dir($templatesC)) {
-            $this->clearDirectoryContents($templatesC);
-            $this->log('Cleared templates_c.');
-        }
-
         if ($restoreMaintenance) {
             $this->restorePreviousMaintenanceMode();
         }
@@ -1090,6 +1113,29 @@ class UpdateApplier
         $this->log('Finalize complete.');
 
         return ['ok' => true, 'error' => ''];
+    }
+
+    /**
+     * Clear Smarty compiled template cache (templates_c / $templates_compiledir).
+     *
+     * @return array{ok:bool,error:string,path:string,cleared:bool}
+     */
+    public function clearTemplateCache(): array
+    {
+        $dir = $this->getTemplatesCompileDir();
+        if (!is_dir($dir)) {
+            $this->log('Template cache directory not found: ' . $dir);
+            return ['ok' => true, 'error' => '', 'path' => $dir, 'cleared' => false];
+        }
+
+        $this->clearDirectoryContents($dir);
+        $this->log('Cleared template cache: ' . $dir);
+
+        if (function_exists('opcache_reset')) {
+            @opcache_reset();
+        }
+
+        return ['ok' => true, 'error' => '', 'path' => $dir, 'cleared' => true];
     }
 
     public function clearDirectoryContents(string $dir): void

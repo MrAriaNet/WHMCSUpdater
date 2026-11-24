@@ -219,27 +219,41 @@ class ManualUpdater
 
         $picked = $this->catalog->pickTarget($parsed['releases'], $installed, $channel, $exactVersion);
         $blocked = isset($picked['blocked']) && is_array($picked['blocked']) ? $picked['blocked'] : null;
+        $selectable = $this->catalog->listSelectableReleases($parsed['releases'], $installed, $channel);
 
         if (!$picked['ok'] || !$picked['release']) {
-            $message = $picked['error'] === 'already_latest'
-                ? 'Already on the latest release for this channel.'
-                : 'No suitable release: ' . $picked['error'];
-            if ($blocked !== null) {
-                $message = $this->catalog->formatBlockedMessage($blocked, null);
+            $isLatest = ($picked['error'] === 'already_latest');
+            // already_latest is not a failure — keep state clean so a page refresh
+            // does not re-show a flash notice; the AJAX layer injects a one-shot message.
+            if ($isLatest) {
+                $this->store->mergeState([
+                    'phase' => 'catalog',
+                    'status' => 'idle',
+                    'error' => '',
+                    'message' => '',
+                    'release' => null,
+                    'blocked' => null,
+                    'major_upgrade' => false,
+                ]);
+            } else {
+                $message = 'No suitable release: ' . $picked['error'];
+                if ($blocked !== null) {
+                    $message = $this->catalog->formatBlockedMessage($blocked, null);
+                }
+                $this->store->mergeState([
+                    'phase' => 'catalog',
+                    'status' => 'error',
+                    'error' => $picked['error'],
+                    'message' => $message,
+                    'release' => $picked['release'],
+                    'blocked' => $blocked,
+                    'major_upgrade' => false,
+                ]);
             }
-            $this->store->mergeState([
-                'phase' => 'catalog',
-                'status' => $picked['error'] === 'already_latest' ? 'idle' : 'error',
-                'error' => $picked['error'],
-                'message' => $message,
-                'release' => $picked['release'],
-                'blocked' => $blocked,
-                'major_upgrade' => false,
-            ]);
             return [
                 'ok' => false,
                 'release' => $picked['release'],
-                'releases' => array_slice($parsed['releases'], 0, 10),
+                'releases' => $selectable,
                 'error' => $picked['error'],
                 'installed' => $installed,
                 'blocked' => $blocked,
@@ -268,7 +282,7 @@ class ManualUpdater
         return [
             'ok' => true,
             'release' => $release,
-            'releases' => array_slice($parsed['releases'], 0, 10),
+            'releases' => $selectable,
             'error' => '',
             'installed' => $installed,
             'blocked' => $blocked,
@@ -523,6 +537,14 @@ class ManualUpdater
     public function mergeState(array $patch): void
     {
         $this->store->mergeState($patch);
+    }
+
+    /**
+     * @return array{ok:bool,error:string,path:string,cleared:bool}
+     */
+    public function clearTemplateCache(): array
+    {
+        return $this->job->getApplier()->clearTemplateCache();
     }
 
     public function clearState(): void

@@ -59,7 +59,7 @@ class ProxyChecker
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_USERAGENT => 'WHMCSUpdater/1.2.0',
+            CURLOPT_USERAGENT => 'WHMCSUpdater/1.0',
             CURLOPT_NOBODY => false,
             CURLOPT_HEADER => false,
         ]);

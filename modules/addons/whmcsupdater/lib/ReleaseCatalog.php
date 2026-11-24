@@ -44,7 +44,7 @@ class ReleaseCatalog
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_USERAGENT => 'WHMCSUpdater/1.2.0',
+            CURLOPT_USERAGENT => 'WHMCSUpdater/1.0',
         ]);
 
         if ($proxy && $repo) {
@@ -203,6 +203,68 @@ class ReleaseCatalog
         }
 
         return ['ok' => false, 'release' => null, 'error' => 'already_latest', 'blocked' => null];
+    }
+
+    /**
+     * Build a UI-friendly list of selectable releases for majors 8 and 9.
+     *
+     * Only versions newer than the installed release are included. Series 9
+     * is listed before series 8; within each series versions are descending.
+     *
+     * @param array<int,array> $releases
+     * @param string $installedVersion
+     * @param string $channel stable|beta|rc|any
+     * @param string|null $phpVersion
+     * @param string|null $ionCubeVersion
+     * @return array<int,array{version:string,full_version:string,series:string,compatible:bool,error:string}>
+     */
+    public function listSelectableReleases(
+        array $releases,
+        string $installedVersion,
+        string $channel = 'stable',
+        ?string $phpVersion = null,
+        ?string $ionCubeVersion = null
+    ): array {
+        $phpVersion = $phpVersion !== null && $phpVersion !== '' ? $phpVersion : PHP_VERSION;
+        $ionCubeVersion = $ionCubeVersion !== null ? $ionCubeVersion : $this->ionCubeVersion();
+        $installed = $this->normalizeVersion($installedVersion);
+
+        $items = [];
+        foreach ($releases as $release) {
+            if (!$this->matchesChannel($release, $channel)) {
+                continue;
+            }
+
+            $version = (string) ($release['version'] ?? '');
+            if ($version === '' || version_compare($version, $installed, '<=')) {
+                continue;
+            }
+
+            $major = (int) explode('.', $version . '.0')[0];
+            if ($major !== 8 && $major !== 9) {
+                continue;
+            }
+
+            $compat = $this->checkCompatibility($release, $phpVersion, $ionCubeVersion);
+            $items[] = [
+                'version' => $version,
+                'full_version' => (string) ($release['full_version'] ?? $version),
+                'series' => (string) $major,
+                'compatible' => $compat['ok'],
+                'error' => (string) ($compat['error'] ?? ''),
+            ];
+        }
+
+        usort($items, static function (array $a, array $b) {
+            $seriesCmp = ((int) $b['series']) <=> ((int) $a['series']);
+            if ($seriesCmp !== 0) {
+                return $seriesCmp;
+            }
+
+            return version_compare($b['version'], $a['version']);
+        });
+
+        return $items;
     }
 
     /**

@@ -298,7 +298,7 @@ class ResumableDownloader
             CURLOPT_TIMEOUT => 0,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_USERAGENT => 'WHMCSUpdater/1.2.0',
+            CURLOPT_USERAGENT => 'WHMCSUpdater/1.0',
             CURLOPT_FAILONERROR => false,
             CURLOPT_BUFFERSIZE => 256 * 1024,
         ];

@@ -76,6 +76,9 @@ if (in_array($command, $standaloneCommands, true)) {
                 exit(6);
             }
             $result = $job->runToCompletion(isset($options['budget']) ? (int) $options['budget'] : UpdateJob::DEFAULT_BUDGET);
+            if (!empty($result['done']) && !empty($result['ok']) && empty($options['keep-templates'])) {
+                $result['templates'] = $job->getApplier()->clearTemplateCache();
+            }
             echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
             if (!empty($result['needs_manual_installer'])) {
                 fwrite(STDERR, "Files ready. Open /install/install.php, then run:\n");
@@ -87,6 +90,9 @@ if (in_array($command, $standaloneCommands, true)) {
         case 'finalize':
             $job->continueAfterManual();
             $result = $job->runToCompletion();
+            if (!empty($result['done']) && !empty($result['ok']) && empty($options['keep-templates'])) {
+                $result['templates'] = $job->getApplier()->clearTemplateCache();
+            }
             echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
             exit(!empty($result['done']) && !empty($result['ok']) ? 0 : 7);
 
@@ -176,6 +182,9 @@ switch ($command) {
             'yes' => true,
             'no_backup' => !empty($options['no-backup']),
         ]);
+        if (!empty($result['ok']) && empty($result['needs_manual_installer']) && empty($options['keep-templates'])) {
+            $result['templates'] = $updater->clearTemplateCache();
+        }
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
         if (!empty($result['needs_manual_installer'])) {
             fwrite(STDERR, "Files ready. Open /install/install.php, then run finalize.\n");
@@ -253,6 +262,7 @@ Options:
   --php=PATH                 PHP CLI binary for installer.php
   --yes                      Confirm destructive apply/run
   --no-backup                Skip file backup before overwrite
+  --keep-templates           Do not clear templates_c after a successful update
 
 Examples:
   php update.php check

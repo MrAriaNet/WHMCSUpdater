@@ -12,6 +12,7 @@
  *   ?action=step&token=…&budget=12
  *   ?action=rollback&token=…
  *   ?action=continue_manual&token=…
+ *   ?action=clear_templates&token=… (token optional after successful complete)
  *
  * Browser recovery UI:
  *   ?action=ui&token=…
@@ -38,8 +39,17 @@ $token = (string) ($_REQUEST['token'] ?? '');
 $store = new StateStore($workDir);
 if ($token === '' || !$store->validateToken($token)) {
     // Allow status of idle without token only for empty state — otherwise 403.
+    // After a successful update the apply token is cleared; still allow status /
+    // clear_templates while the completed state remains on disk.
     $actionProbe = strtolower((string) ($_REQUEST['action'] ?? 'status'));
-    if (!($actionProbe === 'status' && !is_file($workDir . '/' . StateStore::TOKEN_FILE) && !is_file($workDir . '/' . StateStore::STATE_FILE))) {
+    $stateProbe = $store->getState();
+    $postComplete = in_array($actionProbe, ['status', 'clear_templates'], true)
+        && ($stateProbe['phase'] ?? '') === 'done'
+        && ($stateProbe['status'] ?? '') === 'complete';
+    $idleEmpty = $actionProbe === 'status'
+        && !is_file($workDir . '/' . StateStore::TOKEN_FILE)
+        && !is_file($workDir . '/' . StateStore::STATE_FILE);
+    if (!$idleEmpty && !$postComplete) {
         http_response_code(403);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['ok' => false, 'error' => 'invalid_token']);
@@ -111,6 +121,20 @@ switch ($action) {
         $job->continueAfterManual();
         $result = $job->tick(max(5, min(45, (int) ($_REQUEST['budget'] ?? UpdateJob::DEFAULT_BUDGET))));
         echo json_encode($result);
+        exit;
+
+    case 'clear_templates':
+        $result = $job->getApplier()->clearTemplateCache();
+        echo json_encode([
+            'ok' => $result['ok'],
+            'error' => $result['error'],
+            'path' => $result['path'],
+            'cleared' => $result['cleared'],
+            'message' => $result['ok']
+                ? 'Template cache cleared successfully.'
+                : ($result['error'] !== '' ? $result['error'] : 'Failed to clear template cache.'),
+            'state' => $job->statusPayload(),
+        ]);
         exit;
 
     case 'status':
@@ -240,6 +264,7 @@ code{font-size:12px;background:#f0f3f6;padding:2px 6px;border-radius:3px;}
 (function(){
   var token = {$tokenJs};
   var state = {$json};
+  var offeredTemplateClear = false;
   function apply(s){
     if(!s) return;
     document.getElementById('phase').textContent = s.phase || '';
@@ -260,6 +285,14 @@ code{font-size:12px;background:#f0f3f6;padding:2px 6px;border-radius:3px;}
     return fetch(location.pathname, {method:'POST', body:body, credentials:'same-origin', cache:'no-store'})
       .then(function(r){ return r.json(); });
   }
+  function offerClearTemplateCache(){
+    if (offeredTemplateClear) return;
+    offeredTemplateClear = true;
+    if (!confirm('Update completed successfully. Clear the template cache (templates_c) now?')) return;
+    call('clear_templates').then(function(res){
+      alert(res && res.message ? res.message : (res && res.ok ? 'Template cache cleared.' : (res && res.error ? res.error : 'failed')));
+    }).catch(function(e){ alert(String(e)); });
+  }
   var busy=false;
   function loop(){
     if(busy) return;
@@ -267,6 +300,10 @@ code{font-size:12px;background:#f0f3f6;padding:2px 6px;border-radius:3px;}
     call('step', {budget:12}).then(function(res){
       if(res.state) apply(res.state);
       busy=false;
+      if(res.ok && res.done){
+        offerClearTemplateCache();
+        return;
+      }
       if(res.ok && !res.done && !res.needs_manual_installer && res.state && res.state.status !== 'awaiting_manual' && res.state.status !== 'error'){
         setTimeout(loop, 400);
       }
@@ -281,6 +318,9 @@ code{font-size:12px;background:#f0f3f6;padding:2px 6px;border-radius:3px;}
     call('rollback').then(function(res){ if(res.state) apply(res.state); alert(res.ok ? 'Rollback complete' : (res.error||'failed')); });
   };
   apply(state);
+  if (state && state.status === 'complete' && state.phase === 'done') {
+    offerClearTemplateCache();
+  }
 })();
 </script>
 </body>

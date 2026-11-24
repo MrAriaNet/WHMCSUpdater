@@ -67,6 +67,11 @@ class AdminUi
         $muStatus = [];
         try {
             $muStatus = (new ManualUpdater())->statusPayload();
+            // Legacy state may still have already_latest as a red error; never show it on load.
+            if (($muStatus['error'] ?? '') === 'already_latest') {
+                $muStatus['error'] = '';
+                $muStatus['message'] = '';
+            }
         } catch (\Throwable $e) {
             $muStatus = ['phase' => 'idle', 'status' => 'error', 'message' => $e->getMessage(), 'error' => $e->getMessage()];
         }
@@ -139,14 +144,22 @@ class AdminUi
                     $channel = (string) ($_POST['channel'] ?? 'stable');
                     $version = trim((string) ($_POST['version'] ?? ''));
                     $result = $updater->checkForUpdate($version !== '' ? $version : null, $channel);
+                    $state = $updater->statusPayload();
+                    // One-shot success notice — not persisted, so it disappears on refresh.
+                    if (($result['error'] ?? '') === 'already_latest') {
+                        $state['error'] = '';
+                        $state['message'] = Lang::get($lang, 'mu_already_latest');
+                        $state['notice'] = 'ok';
+                    }
                     echo json_encode([
                         'ok' => $result['ok'],
                         'error' => $result['error'],
                         'installed' => $result['installed'],
                         'release' => $result['release'],
+                        'releases' => $result['releases'] ?? [],
                         'blocked' => $result['blocked'] ?? null,
                         'major_upgrade' => !empty($result['major_upgrade']),
-                        'state' => $updater->statusPayload(),
+                        'state' => $state,
                     ]);
                     break;
 
@@ -237,6 +250,20 @@ class AdminUi
                     echo json_encode(['ok' => true, 'state' => $updater->statusPayload()]);
                     break;
 
+                case 'mu_clear_templates':
+                    $result = $updater->clearTemplateCache();
+                    echo json_encode([
+                        'ok' => $result['ok'],
+                        'error' => $result['error'],
+                        'path' => $result['path'],
+                        'cleared' => $result['cleared'],
+                        'message' => $result['ok']
+                            ? Lang::get($lang, 'mu_templates_cleared')
+                            : ($result['error'] !== '' ? $result['error'] : Lang::get($lang, 'mu_templates_clear_failed')),
+                        'state' => $updater->statusPayload(),
+                    ]);
+                    break;
+
                 default:
                     echo json_encode(['ok' => false, 'error' => 'unknown_action']);
             }
@@ -293,6 +320,7 @@ class AdminUi
         $html[] = '</div>';
 
         $html[] = '<p id="pp-mu-message" class="pp-help">' . self::e((string) ($status['message'] ?? '')) . '</p>';
+        $html[] = '<div id="pp-mu-notice" class="pp-alert pp-ok" style="display:none;"></div>';
         $html[] = '<div id="pp-mu-error" class="pp-alert pp-error" style="' . (!empty($status['error']) ? '' : 'display:none;') . '">' . self::e((string) ($status['error'] ?? '')) . '</div>';
         $blockedVisible = !empty($status['blocked']) && is_array($status['blocked']);
         $html[] = '<div id="pp-mu-blocked" class="pp-alert pp-warn" style="' . ($blockedVisible ? '' : 'display:none;') . '">'
@@ -304,6 +332,13 @@ class AdminUi
             . '</div>';
         $html[] = '<div id="pp-mu-manual" class="pp-alert pp-warn" style="display:none;"></div>';
         $html[] = '<div id="pp-mu-interrupted" class="pp-alert pp-warn" style="' . ($interrupted ? '' : 'display:none;') . '">' . self::e(Lang::get($lang, 'mu_interrupted')) . '</div>';
+
+        $html[] = '<div class="pp-field pp-mu-version">';
+        $html[] = '<label for="pp-mu-version">' . self::e(Lang::get($lang, 'mu_version_label')) . '</label>';
+        $html[] = '<select id="pp-mu-version" class="form-control" dir="ltr">';
+        $html[] = '<option value="">' . self::e(Lang::get($lang, 'mu_version_auto')) . '</option>';
+        $html[] = '</select>';
+        $html[] = '</div>';
 
         $html[] = '<div class="pp-actions pp-mu-actions">';
         $html[] = '<button type="button" class="btn btn-default" id="pp-mu-btn-check">' . self::e(Lang::get($lang, 'mu_btn_check')) . '</button>';
@@ -389,11 +424,17 @@ class AdminUi
     {
         $confirmMsg = json_encode(Lang::get($lang, 'mu_confirm_apply'), JSON_UNESCAPED_UNICODE);
         $confirmRollback = json_encode(Lang::get($lang, 'mu_confirm_rollback'), JSON_UNESCAPED_UNICODE);
+        $confirmTemplates = json_encode(Lang::get($lang, 'mu_confirm_clear_templates'), JSON_UNESCAPED_UNICODE);
         $manualMsg = json_encode(Lang::get($lang, 'mu_manual_installer'), JSON_UNESCAPED_UNICODE);
         $resumeLabel = json_encode(Lang::get($lang, 'mu_btn_resume'), JSON_UNESCAPED_UNICODE);
         $applyLabel = json_encode(Lang::get($lang, 'mu_btn_apply'), JSON_UNESCAPED_UNICODE);
         $blockedTpl = json_encode(Lang::get($lang, 'mu_blocked_path'), JSON_UNESCAPED_UNICODE);
         $majorWarn = json_encode(Lang::get($lang, 'mu_major_upgrade_warn'), JSON_UNESCAPED_UNICODE);
+        $versionAuto = json_encode(Lang::get($lang, 'mu_version_auto'), JSON_UNESCAPED_UNICODE);
+        $versionSeries9 = json_encode(Lang::get($lang, 'mu_version_series_9'), JSON_UNESCAPED_UNICODE);
+        $versionSeries8 = json_encode(Lang::get($lang, 'mu_version_series_8'), JSON_UNESCAPED_UNICODE);
+        $versionIncompat = json_encode(Lang::get($lang, 'mu_version_incompatible'), JSON_UNESCAPED_UNICODE);
+        $alreadyLatest = json_encode(Lang::get($lang, 'mu_already_latest'), JSON_UNESCAPED_UNICODE);
         $moduleLinkJs = json_encode($moduleLink, JSON_UNESCAPED_SLASHES);
         $runnerUrlJs = json_encode($runnerUrl, JSON_UNESCAPED_SLASHES);
 
@@ -404,13 +445,21 @@ class AdminUi
   var runnerUrl = {$runnerUrlJs};
   var confirmMsg = {$confirmMsg};
   var confirmRollback = {$confirmRollback};
+  var confirmTemplates = {$confirmTemplates};
   var manualMsg = {$manualMsg};
   var resumeLabel = {$resumeLabel};
   var applyLabel = {$applyLabel};
   var blockedTpl = {$blockedTpl};
   var majorWarn = {$majorWarn};
+  var versionAuto = {$versionAuto};
+  var versionSeries9 = {$versionSeries9};
+  var versionSeries8 = {$versionSeries8};
+  var versionIncompat = {$versionIncompat};
+  var alreadyLatest = {$alreadyLatest};
   var busy = false;
   var applyToken = null;
+  var fillingVersions = false;
+  var offeredTemplateClear = false;
 
   function tokenValue() {
     var el = document.querySelector('#pp-mu-token-wrap input[name="token"]');
@@ -435,14 +484,26 @@ class AdminUi
     set('pp-mu-target', (state.release && state.release.full_version) ? state.release.full_version : '—');
     set('pp-mu-phase', state.phase || 'idle');
     set('pp-mu-status', state.status || 'idle');
-    set('pp-mu-message', state.message || '');
+    set('pp-mu-message', state.notice === 'ok' ? '' : (state.message || ''));
     set('pp-mu-percent', (state.percent != null ? state.percent : 0) + '%');
     set('pp-mu-bytes', fmtBytes(state.bytes) + ' / ' + fmtBytes(state.total));
     var bar = document.getElementById('pp-mu-bar');
     if (bar) bar.style.width = (state.percent || 0) + '%';
+    var notice = document.getElementById('pp-mu-notice');
+    if (notice) {
+      if (state.notice === 'ok') {
+        notice.style.display = '';
+        notice.textContent = state.message || alreadyLatest;
+      } else {
+        notice.style.display = 'none';
+        notice.textContent = '';
+      }
+    }
     var err = document.getElementById('pp-mu-error');
     if (err) {
-      if (state.error) { err.style.display = ''; err.textContent = state.error; }
+      var errText = state.error || '';
+      if (errText === 'already_latest') errText = '';
+      if (errText) { err.style.display = ''; err.textContent = errText; }
       else { err.style.display = 'none'; err.textContent = ''; }
     }
     var blockedEl = document.getElementById('pp-mu-blocked');
@@ -542,6 +603,110 @@ class AdminUi
       var btn = document.getElementById('pp-mu-btn-' + name);
       if (btn) btn.disabled = busy && name !== 'clear';
     });
+    var versionSelect = document.getElementById('pp-mu-version');
+    if (versionSelect) versionSelect.disabled = busy;
+  }
+
+  function offerClearTemplateCache() {
+    if (offeredTemplateClear) return;
+    offeredTemplateClear = true;
+    if (!window.confirm(confirmTemplates)) return;
+    post('mu_clear_templates', {}).then(function (res) {
+      var msg = (res && res.message) ? res.message : (res && res.ok ? 'OK' : (res && res.error ? res.error : 'failed'));
+      var notice = document.getElementById('pp-mu-notice');
+      if (res && res.ok) {
+        if (notice) { notice.style.display = ''; notice.textContent = msg; }
+      } else {
+        var err = document.getElementById('pp-mu-error');
+        if (err) { err.style.display = ''; err.textContent = msg; }
+        else alert(msg);
+      }
+    }).catch(function (e) { alert(e); });
+  }
+
+  function onUpdateFinished(res) {
+    if (!res || !res.done) return false;
+    setBusy(false);
+    if (res.ok && res.state && (res.state.status === 'complete' || res.state.phase === 'done')) {
+      offerClearTemplateCache();
+    }
+    return true;
+  }
+
+  function selectedVersion() {
+    var el = document.getElementById('pp-mu-version');
+    return el ? String(el.value || '').trim() : '';
+  }
+
+  function fillVersionSelect(releases, preferredVersion) {
+    var sel = document.getElementById('pp-mu-version');
+    if (!sel || !Array.isArray(releases)) return;
+
+    var previous = preferredVersion != null ? String(preferredVersion) : selectedVersion();
+    fillingVersions = true;
+    sel.innerHTML = '';
+
+    var autoOpt = document.createElement('option');
+    autoOpt.value = '';
+    autoOpt.textContent = versionAuto;
+    sel.appendChild(autoOpt);
+
+    var groups = { '9': null, '8': null };
+    var labels = { '9': versionSeries9, '8': versionSeries8 };
+
+    releases.forEach(function (item) {
+      if (!item || !item.version) return;
+      var series = String(item.series || '');
+      if (series !== '8' && series !== '9') return;
+      if (!groups[series]) {
+        var og = document.createElement('optgroup');
+        og.label = labels[series] || ('WHMCS ' + series + '.x');
+        groups[series] = og;
+        sel.appendChild(og);
+      }
+      var opt = document.createElement('option');
+      opt.value = String(item.version);
+      var label = item.full_version || item.version;
+      if (!item.compatible) {
+        opt.disabled = true;
+        label += ' ' + versionIncompat;
+      }
+      opt.textContent = label;
+      groups[series].appendChild(opt);
+    });
+
+    var found = false;
+    if (previous) {
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === previous && !sel.options[i].disabled) {
+          sel.selectedIndex = i;
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) sel.value = '';
+    fillingVersions = false;
+  }
+
+  function handleCheckResponse(res) {
+    if (res.releases) fillVersionSelect(res.releases, selectedVersion());
+    if (res.state) applyState(res.state);
+    else if (res.release || res.installed) {
+      applyState(Object.assign({phase:'catalog', status: res.ok ? 'ready' : 'error'}, res));
+    }
+  }
+
+  function runCheck() {
+    if (busy) return;
+    setBusy(true);
+    var version = selectedVersion();
+    var fields = {};
+    if (version) fields.version = version;
+    post('mu_check', fields).then(function (res) {
+      handleCheckResponse(res);
+      setBusy(false);
+    }).catch(function (e) { setBusy(false); alert(e); });
   }
 
   function loopDownload() {
@@ -573,7 +738,7 @@ class AdminUi
         return;
       }
       if (!res.ok) { setBusy(false); return; }
-      if (res.done) { setBusy(false); return; }
+      if (onUpdateFinished(res)) return;
       setTimeout(loopApplySteps, 350);
     }).catch(function (e) {
       // Admin may be offline; keep stepping via runner.
@@ -582,14 +747,16 @@ class AdminUi
   }
 
   document.getElementById('pp-mu-btn-check').addEventListener('click', function () {
-    if (busy) return;
-    setBusy(true);
-    post('mu_check', {}).then(function (res) {
-      if (res.state) applyState(res.state);
-      else if (res.release) applyState(Object.assign({phase:'catalog',status:res.ok?'ready':'error'}, res));
-      setBusy(false);
-    }).catch(function (e) { setBusy(false); alert(e); });
+    runCheck();
   });
+
+  var versionEl = document.getElementById('pp-mu-version');
+  if (versionEl) {
+    versionEl.addEventListener('change', function () {
+      if (fillingVersions || busy) return;
+      runCheck();
+    });
+  }
 
   document.getElementById('pp-mu-btn-download').addEventListener('click', function () {
     loopDownload();
@@ -632,6 +799,7 @@ class AdminUi
       runner('continue_manual', {budget: 12}).then(function (res) {
         if (res.state) applyState(res.state);
         if (res.ok && !res.done) { loopApplySteps(); return; }
+        if (onUpdateFinished(res)) return;
         setBusy(false);
       }).catch(function () { setBusy(false); });
       return;
@@ -642,6 +810,11 @@ class AdminUi
       return post('mu_finalize', { token: token });
     }).then(function (res) {
       if (res.state) applyState(res.state);
+      if (res && res.ok && res.state && (res.state.status === 'complete' || res.state.phase === 'done')) {
+        setBusy(false);
+        offerClearTemplateCache();
+        return;
+      }
       setBusy(false);
     }).catch(function () { setBusy(false); });
   });
@@ -1130,6 +1303,8 @@ JS;
 #whmcsupdater-admin .pp-mu-options{display:flex;flex-wrap:wrap;gap:12px 18px;margin:10px 0;}
 #whmcsupdater-admin .pp-mu-options label{font-weight:500;}
 #whmcsupdater-admin .pp-mu-actions{margin-top:8px;}
+#whmcsupdater-admin .pp-mu-version{margin:10px 0 14px;max-width:320px;}
+#whmcsupdater-admin .pp-mu-version select{width:100%;}
 </style>
 CSS;
     }

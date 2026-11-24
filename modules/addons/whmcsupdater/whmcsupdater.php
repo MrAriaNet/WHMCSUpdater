@@ -11,7 +11,7 @@
  * @copyright  Copyright (c) 2026 Aria Jahangiri Far
  * @license    MIT
  * @link       https://github.com/MrAriaNet/WHMCSUpdater
- * @version    1.2.0
+ * @version    1.0
  */
 
 if (!defined('WHMCS')) {
@@ -30,7 +30,7 @@ function whmcsupdater_config()
     return [
         'name' => 'WHMCS Updater',
         'description' => 'Apply resumable manual WHMCS updates to completion, with an optional Proxy Pool (HTTP, HTTPS, SOCKS5) for Automatic Updater traffic.',
-        'version' => '1.2.0',
+        'version' => '1.0',
         'author' => 'Aria Jahangiri Far',
         'language' => 'english',
         'fields' => [

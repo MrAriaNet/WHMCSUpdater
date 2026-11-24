@@ -186,6 +186,46 @@ JSON;
         ok('isMajorUpgrade false within 9.x');
     }
 
+    // Selectable list: both series 8 and 9, newer than installed, compatibility flags
+    $list = $catalog->listSelectableReleases($parsed['releases'], '8.9.0', 'stable', '8.1.0', '12.0.1');
+    $seriesSeen = [];
+    $tooOld = false;
+    $nineCompat = null;
+    foreach ($list as $item) {
+        $seriesSeen[(string) ($item['series'] ?? '')] = true;
+        if (version_compare((string) $item['version'], '8.9.0', '<=')) {
+            $tooOld = true;
+        }
+        if (($item['version'] ?? '') === '9.1.1') {
+            $nineCompat = !empty($item['compatible']);
+        }
+    }
+    if ($tooOld) {
+        fail('listSelectableReleases included version <= installed');
+    } elseif (empty($seriesSeen['8']) || empty($seriesSeen['9'])) {
+        fail('listSelectableReleases missing series 8/9: ' . json_encode(array_keys($seriesSeen)));
+    } elseif ($nineCompat !== false) {
+        fail('9.1.1 should be incompatible on PHP 8.1, got compatible=' . json_encode($nineCompat));
+    } elseif (($list[0]['series'] ?? '') !== '9') {
+        fail('listSelectableReleases should list series 9 before 8');
+    } else {
+        ok('listSelectableReleases 8+9 with PHP 8.1 incompat for 9.x');
+    }
+
+    $listOk = $catalog->listSelectableReleases($parsed['releases'], '8.13.7', 'stable', '8.3.0', '15.0.0');
+    $nineOk = false;
+    foreach ($listOk as $item) {
+        if (($item['version'] ?? '') === '9.1.1' && !empty($item['compatible'])) {
+            $nineOk = true;
+            break;
+        }
+    }
+    if (!$nineOk) {
+        fail('9.1.1 should be compatible on PHP 8.3/ion15');
+    } else {
+        ok('listSelectableReleases 9.1.1 compatible on PHP 8.3/ion15');
+    }
+
     // Exact version with injected compatible stack
     $pickedExact = $catalog->pickTarget($parsed['releases'], '9.0.9', 'stable', '9.1.1', '8.3.0', '15.0.0');
     if (!$pickedExact['ok'] || ($pickedExact['release']['version'] ?? '') !== '9.1.1') {
